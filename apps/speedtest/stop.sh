@@ -1,0 +1,2 @@
+docker kill wiot-speedtest
+
