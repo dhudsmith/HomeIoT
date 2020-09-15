@@ -12,16 +12,35 @@
 import argparse
 import time
 import sys
+import psutil
 import platform
 import json
 import signal
 from uuid import getnode as get_mac
-import wiotp.sdk.device
-import speedtest
+
+
+try:
+    import wiotp.sdk.device
+except ImportError:
+    # This part is only required to run the sample from within the samples
+    # directory when the module itself is not installed.
+    #
+    # If you have the module installed, just use "import wiotp.sdk"
+    import os
+    import inspect
+
+    cmd_subfolder = os.path.realpath(
+        os.path.abspath(os.path.join(os.path.split(inspect.getfile(inspect.currentframe()))[0], "../../../src"))
+    )
+    if cmd_subfolder not in sys.path:
+        sys.path.insert(0, cmd_subfolder)
+    import wiotp.sdk.device
+
 
 def interruptHandler(signal, frame):
     client.disconnect()
     sys.exit(0)
+
 
 def commandProcessor(cmd):
     global interval
@@ -40,15 +59,16 @@ def commandProcessor(cmd):
         else:
             print(cmd.data["message"])
 
+
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, interruptHandler)
 
     # Seconds to sleep between readings
-    interval = 600
+    interval = 60
 
     # Initialize the properties we need
     parser = argparse.ArgumentParser(
-        description="Utility for periodically checking internet speed",
+        description="IBM Watson IoT Platform PSUtil device client.  For more information see https://github.com/ibm-watson-iot/iot-python/samples/psutil",
         epilog="If neither the quickstart or cfg parameter is provided the device will attempt to parse the configuration from environment variables.",
     )
     parser.add_argument(
@@ -97,26 +117,38 @@ if __name__ == "__main__":
 
     print("(Press Ctrl+C to disconnect)")
 
-    # servers for speedtest
-    servers=[]
-    threads = None
-    s = speedtest.Speedtest()
-
+    # Take initial reading
+    psutil.cpu_percent(percpu=False)
+    before_ts = time.time()
+    ioBefore = psutil.net_io_counters()
+    diskBefore = psutil.disk_io_counters()
+    psutil.disk_io_counters(perdisk=False, nowrap=True)
     while True:
         time.sleep(interval)
+        after_ts = time.time()
+        ioAfter = psutil.net_io_counters()
+        diskAfter = psutil.disk_io_counters()
+        # Calculate the time taken between IO checks
+        duration = after_ts - before_ts
 
-        s.get_servers(servers)
-        s.get_best_server()
-        s.download(threads=threads)
-        s.upload(threads=threads)
-        s.results.share()
-
-        results_dict = s.results.dict()
-
+        data = {
+            "name": args.name,
+            "cpu": psutil.cpu_percent(percpu=False),
+            "mem": psutil.virtual_memory().percent,
+            "network": {
+                "up": round((ioAfter.bytes_sent - ioBefore.bytes_sent) / (duration * 1024), 2),
+                "down": round((ioAfter.bytes_recv - ioBefore.bytes_recv) / (duration * 1024), 2),
+            },
+            "disk": {
+                "read": round((diskAfter.read_bytes - diskBefore.read_bytes) / (duration * 1024), 2),
+                "write": round((diskAfter.write_bytes - diskBefore.write_bytes) / (duration * 1024), 2),
+            },
+        }
         if args.verbose:
-            print("Datapoint = " + json.dumps(results_dict))
+            print("Datapoint = " + json.dumps(data))
 
-        client.publishEvent("speedtest", "json", results_dict)
-
+        client.publishEvent("psutil", "json", data)
         # Update timestamp and data ready for next loop
-        
+        before_ts = after_ts
+        ioBefore = ioAfter
+        diskBefore = diskAfter
