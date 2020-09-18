@@ -64,7 +64,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, interruptHandler)
 
     # Seconds to sleep between readings
-    interval = 900
+    interval = 1200
 
     # Initialize the properties we need
     parser = argparse.ArgumentParser(
