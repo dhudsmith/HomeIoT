@@ -1,5 +1,6 @@
 import json
 from os.path import join, dirname
+from threading import Thread
 from ibm_watson import SpeechToTextV1
 from ibm_watson.websocket import RecognizeCallback, AudioSource
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
@@ -28,13 +29,23 @@ class MyRecognizeCallback(RecognizeCallback):
     def on_inactivity_timeout(self, error):
         print('Inactivity timeout: {}'.format(error))
 
-myRecognizeCallback = MyRecognizeCallback()
-
 # speech recognition function
-def watson_streaming_stt(audio_stream, content_type):
-	speech_to_text.recognize_using_websocket(
-	        audio=audio_source,
-        	content_type= content_type,
-	        recognize_callback=myRecognizeCallback,
-	        model='en-US_BroadbandModel',
-	        max_alternatives=3)
+def watson_streaming_stt(buffer_queue, content_type):
+
+    audio_source = AudioSource(buffer_queue, True, True)
+    callback = MyRecognizeCallback()
+    stt_stream_thread = Thread(
+        target=speech_to_text.recognize_using_websocket,
+        kwargs=dict(
+            audio=audio_source,
+            content_type= content_type,
+            recognize_callback=callback,
+            model='en-US_BroadbandModel',
+            interim_results=False,
+            max_alternatives=1)
+    )
+    stt_stream_thread.start()
+
+    # return everything needed by main script
+    return {'audio_source': audio_source,
+            'stream_thread': stt_stream_thread}
